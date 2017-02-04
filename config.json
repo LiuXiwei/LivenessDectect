@@ -1,0 +1,8 @@
+{
+"MODEL_PATH":"models/M_Finance_Composite_General_Liveness_2.0.0.model",
+"COMPLEXITY":"EASY",
+"MOTION_LIST":["BLINK","HEADYAW","HEADNOD","MOUTH"],
+"API_ID":"38d667c696d24eec91f0bcf055b2b5a9",
+"API_SECRET":"1a9da6facefa49e1b1cc80e89e902f78",
+"URL":"https://v1-auth-api.visioncloudapi.com/hackness/ls_hack_detect"
+}
