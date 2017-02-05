@@ -20,6 +20,7 @@ using namespace std;
 #define TIMEOUT_COUNT 8
 #define SEQ_LENGTH 4
 #define LIMIT_SCORE 0.98
+#define  MAX_STEP 10
 cv_finance_motion motion[SEQ_LENGTH] = { CV_LIVENESS_BLINK,
 CV_LIVENESS_MOUTH, CV_LIVENESS_HEADYAW, CV_LIVENESS_HEADNOD };
 
@@ -27,7 +28,7 @@ static QString s_actions[4] = { QString::fromLocal8Bit("请眨眼"), QString::fromL
 								QString::fromLocal8Bit("请左右摇头"),QString::fromLocal8Bit("请上下点头") };
 
 Liveness::Liveness(QWidget *parent)
-: QWidget(parent), m_bLivenessDetect(false), m_last_face_id(-1), m_timeout_count(TIMEOUT_COUNT)
+: QWidget(parent), m_bLivenessDetect(false), m_timeout_count(TIMEOUT_COUNT)
 
 {
 	ui.setupUi(this);
@@ -112,7 +113,7 @@ bool Liveness::init_config()
 	API_ID = "ERROR";
 	QString val;
 	QFile file;
-
+	bool ret = true;
 	file.setFileName("config.json");
 	file.open(QIODevice::ReadOnly | QIODevice::Text);
 	val = file.readAll();
@@ -128,15 +129,15 @@ bool Liveness::init_config()
 
 	API_ID = parse("API_ID");
 	API_SECRET = parse("API_SECRET");
-	if (API_ID == "ERROR" || API_SECRET == "ERROR") return false;
+	if (API_ID == "ERROR" || API_SECRET == "ERROR") ret = false;
 
 	MODEL_PATH = parse("MODEL_PATH");
-	if (MODEL_PATH == "ERROR") return false;
+	if (MODEL_PATH == "ERROR") ret = false;
 
 	URL = parse("URL");
-	if (URL == "ERROR") return false;
+	if (URL == "ERROR")	ret = false;
 	
-	if (parse("MOTION_LIST") != "OK") return false;
+	if (parse("MOTION_LIST") != "OK") ret = false;
 
 	string comp = parse("COMPLEXITY");
 	COMPLEXITY = -1;
@@ -144,31 +145,12 @@ bool Liveness::init_config()
 	if (comp == "NORMAL") COMPLEXITY = WRAPPER_COMPLEXITY_NORMAL;
 	if (comp == "HARD") COMPLEXITY = WRAPPER_COMPLEXITY_HARD;
 	if (comp == "HELL") COMPLEXITY = WRAPPER_COMPLEXITY_HELL;
-	if (comp == "ERROR" || COMPLEXITY == -1) return false;
+	if (comp == "ERROR" || COMPLEXITY == -1) ret = false;
 
-	return true;
+	return ret;
 }
-bool Liveness ::init()
+bool Liveness::bindhandle()
 {
-	step = 0;
-	m_timeout_count = TIMEOUT_COUNT;
-
-	if (!init_config())
-		{
-			if (API_ID == "ERROR" || API_SECRET == "ERROR" || URL == "ERROR")
-			{
-				QMessageBox::about(NULL, QString::fromLocal8Bit("消息"), QString::fromLocal8Bit("Fail to parse URL or API_ID or API_SECRET!Can't start Dectect!"));
-				return false;
-			}
-			QMessageBox::about(NULL, QString::fromLocal8Bit("消息"), QString::fromLocal8Bit("Fail to parse config file!Using default configuration!"));
-			motion_list.clear();
-			tot = 4;
-			for (int i = 0; i < SEQ_LENGTH; i++)
-				motion_list.push_back(i);
-			COMPLEXITY = WRAPPER_COMPLEXITY_EASY;
-			MODEL_PATH = "models/M_Finance_Composite_General_Liveness_2.0.0.model";
-		}
-
 	if (handle_liveness != NULL)
 	{
 		cv_result = cv_finance_motion_liveness_end(handle_liveness);
@@ -176,32 +158,65 @@ bool Liveness ::init()
 	}
 
 	cv_result = cv_finance_create_motion_liveness_handle(&handle_liveness,
-			MODEL_PATH.data());
-	
+		MODEL_PATH.data());
+
 	if (cv_result != CV_OK)
 	{
 		QMessageBox::about(NULL, QString::fromLocal8Bit("消息"), QString::fromLocal8Bit("cv_finance_create_motion_liveness_handle failed!!!"));
-	}		
-	
+		return false;
+	}
+
 	cv_result = cv_finance_motion_liveness_begin(handle_liveness,
-			COMPLEXITY|
-			WRAPPER_OUTPUT_TYPE_MULTI_IMAGE|
-			WRAPPER_LOG_LEVEL_SINGLE_FRAME);
+		COMPLEXITY |
+		WRAPPER_OUTPUT_TYPE_MULTI_IMAGE |
+		WRAPPER_LOG_LEVEL_SINGLE_FRAME);
 
 	if (cv_result != CV_OK)
 	{
 		QMessageBox::about(NULL, QString::fromLocal8Bit("消息"), QString::fromLocal8Bit("cv_finance_motion_liveness_begin failed!!!"));
-	}		
+		return false;
+	}
 
 	cv_finance_motion_liveness_set_motion(
-			handle_liveness, motion[motion_list[step]]);		
+		handle_liveness, motion[motion_list[step]]);
 
 	if (cv_result != CV_OK)
 	{
 		QMessageBox::about(NULL, QString::fromLocal8Bit("消息"), QString::fromLocal8Bit("fail to set motion!!!"));
-	}		
+		return false;
+	}
 
 	return true;
+}
+void Liveness::UseDefaultConfig()
+{
+	QMessageBox::about(NULL, QString::fromLocal8Bit("消息"), QString::fromLocal8Bit("Fail to parse config file!Using default configuration!"));
+	motion_list.clear();
+	tot = 4;
+	for (int i = 0; i < SEQ_LENGTH; i++)
+	motion_list.push_back(i);
+	COMPLEXITY = WRAPPER_COMPLEXITY_EASY;
+	MODEL_PATH = "models/M_Finance_Composite_General_Liveness_2.0.0.model";
+}
+bool Liveness ::init()
+{
+	step = 0;
+	m_timeout_count = TIMEOUT_COUNT;
+	motion_list.clear();
+
+	if (!init_config())
+		{
+			if (API_ID == "ERROR" || API_SECRET == "ERROR" || URL == "ERROR")
+			{
+				QMessageBox::about(NULL, QString::fromLocal8Bit("消息"), QString::fromLocal8Bit("Fail to parse URL or API_ID or API_SECRET!Can't start Dectect!"));
+				bindhandle();
+				return false;
+			}
+			UseDefaultConfig();
+		}
+
+	return bindhandle();
+
 }
 
 Liveness::~Liveness()
@@ -214,16 +229,18 @@ Liveness::~Liveness()
 
 void Liveness::onOpenCamera()
 {
+	ui.label->clear();
+	m_bLivenessDetect = false;
 	m_capture.open(0);
 	m_frame_width = m_capture.get(CV_CAP_PROP_FRAME_WIDTH);
 	m_frame_height = m_capture.get(CV_CAP_PROP_FRAME_HEIGHT);
+	init();
 	m_timer->start(20);
 }
 
 void Liveness::onCloseCamera()
 {
 	reinitialize(QString::fromLocal8Bit("-1"));
-	m_bLivenessDetect = false;
 	m_timer->stop();
 	m_capture.release();
 	ui.label_showImage->clear();
@@ -245,12 +262,11 @@ void Liveness::onLivenessDetect()
 
 	if (!m_capture.isOpened() || !m_capture.read(read_frame))
 		return;
-
+	double timestamp = 0.0f;
 	gettimeofday(&time, NULL);
 	timestamp = time.tv_sec + (double)time.tv_usec / 1000000.0f;
 	
-	if (m_bLivenessDetect)
-		cv_finance_motion_liveness_input(handle_liveness,
+	cv_finance_motion_liveness_input(handle_liveness,
 		read_frame.data, CV_PIX_FMT_BGR888,
 		read_frame.cols, read_frame.rows,
 		read_frame.step, CV_FINANCE_UP, timestamp,
@@ -312,7 +328,7 @@ void Liveness::onLivenessDetect()
 	
 	cv_finance_motion_liveness_release_frame(p_face, face_count);
 	
-	if (!m_strText.isEmpty())
+	if (!m_strText.isEmpty() && m_bLivenessDetect)
 		ui.label->setText(m_strText);
 	
 	ui.label_showImage->setPixmap(objPixmap);
@@ -320,6 +336,9 @@ void Liveness::onLivenessDetect()
 
 void Liveness::GenerateProtobuf()
 {
+	unsigned char* encrypted_blob = NULL;
+	unsigned int blob_len = 0;
+
 	cv_result = cv_finance_motion_liveness_get_result(handle_liveness,
 		&encrypted_blob, &blob_len);
 	
@@ -337,7 +356,7 @@ void Liveness::GenerateImages()
 	cv_result = cv_finance_motion_liveness_get_images(handle_liveness, &image_list, &image_count);
 	for (int i = 0; i < image_count; ++i) {
 		char filename[64];
-		sprintf(filename, "%d-motion%d.jpeg", i, image_list[i].motion);
+		sprintf(filename, "./img/%d-motion%d.jpeg", i, image_list[i].motion);
 		f = fopen(filename, "wb");
 		fwrite(image_list[i].image, sizeof(char), image_list[i].length, f);
 		fclose(f);
@@ -380,9 +399,6 @@ float Liveness::UploadProtobuf()
 		CURLFORM_COPYCONTENTS, API_SECRET.data(),
 		CURLFORM_END);
 
-	char* file_data = NULL;
-	long file_size = 0;
-
 	curl_formadd(&formpost, &lastptr, CURLFORM_COPYNAME, "liveness_data_file",
 		CURLFORM_FILE, "encrypted.protobuf", CURLFORM_END);
 
@@ -406,9 +422,10 @@ float Liveness::UploadProtobuf()
 
 		ofstream fp("res.json",ios::out);
 		fp << HTTPRESULT << endl;		
-		if (res != CURLE_OK) fp << endl << error << endl; 
+		if (res != CURLE_OK) 
+			fp << endl << error << endl; 
 		fp.close();
-		int posb = HTTPRESULT.find("score");
+  		int posb = HTTPRESULT.find("score");
 		if (posb == -1) return 1.0;
 		posb += 7;
 		int pose = posb;
@@ -418,8 +435,6 @@ float Liveness::UploadProtobuf()
 	curl_easy_cleanup(curl);
 	curl_formfree(formpost);
 
-	if (file_data != NULL) 
-		delete[] file_data;	
 	return ret;
 }
 
@@ -435,11 +450,12 @@ void Liveness::reinitialize(QString& strInfo)
 		m_timeout_timer->stop();
 	}
 	m_strText.clear();
-
-	cv_finance_motion_liveness_begin(handle_liveness,COMPLEXITY |
+	cv_result = cv_finance_motion_liveness_end(handle_liveness); 
+	cv_result = cv_finance_motion_liveness_begin(handle_liveness,COMPLEXITY |
 		WRAPPER_OUTPUT_TYPE_MULTI_IMAGE |
 		WRAPPER_LOG_LEVEL_SINGLE_FRAME);
-
+	cv_finance_motion_liveness_set_motion(
+		handle_liveness, motion[motion_list[step]]);
 	 if (strInfo != QString::fromLocal8Bit("-1"))
 		QMessageBox::about(NULL, QString::fromLocal8Bit("消息"), strInfo);
 }
